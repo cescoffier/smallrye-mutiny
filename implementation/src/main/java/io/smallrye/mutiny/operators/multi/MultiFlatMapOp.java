@@ -269,18 +269,14 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
         void drainLoop() {
             int missed = 1;
 
-            final MultiSubscriber<? super O> a = downstream;
+            final MultiSubscriber<? super O> actualSubscriber = downstream;
 
             for (;;) {
 
-                boolean d;
-
-                FlatMapInner<O>[] as = get();
-
-                int n = as.length;
-
-                Queue<O> sq = queue;
-
+                boolean isDone;
+                FlatMapInner<O>[] innerStreams = get();
+                int numberOfInners = innerStreams.length;
+                Queue<O> mainQueue = queue;
                 boolean noSources = isEmpty();
 
                 if (ifDoneOrCancelled()) {
@@ -289,17 +285,15 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
 
                 boolean again = false;
 
-                long r = requested.get();
-                long e = 0L;
+                long numberOfRequestedItems = requested.get();
+                long numberOfEmittedItems = 0L;
                 long replenishMain = 0L;
 
-                if (r != 0L && sq != null) {
+                if (numberOfRequestedItems != 0L && mainQueue != null) {
 
-                    while (e != r) {
-                        d = done;
-
-                        O v = sq.poll();
-
+                    while (numberOfEmittedItems != numberOfRequestedItems) {
+                        // First emit the items from the buffer.
+                        O v = mainQueue.poll();
                         boolean empty = v == null;
 
                         if (ifDoneOrCancelled()) {
@@ -307,61 +301,66 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
                         }
 
                         if (empty) {
+                            // No more item
                             break;
                         }
 
-                        a.onItem(v);
-
-                        e++;
+                        // Emitted items downstream
+                        actualSubscriber.onItem(v);
+                        numberOfEmittedItems++;
                     }
 
-                    if (e != 0L) {
-                        replenishMain += e;
-                        if (r != Long.MAX_VALUE) {
-                            r = requested.addAndGet(-e);
+                    // End of the queue or the number of emission matches the number of requests
+                    if (numberOfEmittedItems != 0L) {
+                        replenishMain += numberOfEmittedItems;
+                        if (numberOfRequestedItems != Long.MAX_VALUE) {
+                            numberOfRequestedItems = requested.addAndGet(-numberOfEmittedItems);
                         }
-                        e = 0L;
+                        numberOfEmittedItems = 0L;
                         again = true;
                     }
                 }
-                if (r != 0L && !noSources) {
 
+                if (numberOfRequestedItems != 0L && !noSources) {
                     int j = lastIndex;
-                    for (int i = 0; i < n; i++) {
+                    for (int i = 0; i < numberOfInners; i++) {
                         if (cancelled) {
                             cancelUpstream(false);
                             return;
                         }
 
-                        FlatMapInner<O> inner = as[j];
+                        FlatMapInner<O> inner = innerStreams[j];
                         if (inner != null) {
-                            d = inner.done;
+                            isDone = inner.done;
                             Queue<O> q = inner.queue;
-                            if (d && q == null) {
+                            if (isDone && q == null) {
+                                // Inner completed.
                                 remove(inner.index);
                                 again = true;
                                 replenishMain++;
                             } else if (q != null) {
-                                while (e != r) {
-                                    d = inner.done;
+                                // Inner has a queue, we emit until the max number of req or the limit for that inner stream
+                                // The second part of the condition is used to allow other stream to produce their items.
+                                while (numberOfEmittedItems != numberOfRequestedItems && numberOfEmittedItems != limit) {
+                                    isDone = inner.done;
 
-                                    O v;
+                                    O item;
 
                                     try {
-                                        v = q.poll();
+                                        item = q.poll();
                                     } catch (Throwable ex) {
                                         Subscriptions.addFailure(failures, ex);
-                                        v = null;
-                                        d = true;
+                                        item = null;
+                                        isDone = true;
                                     }
 
-                                    boolean empty = v == null;
+                                    boolean empty = item == null;
 
                                     if (ifDoneOrCancelled()) {
                                         return;
                                     }
 
-                                    if (d && empty) {
+                                    if (isDone && empty) {
                                         remove(inner.index);
                                         again = true;
                                         replenishMain++;
@@ -372,41 +371,41 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
                                         break;
                                     }
 
-                                    a.onItem(v);
+                                    actualSubscriber.onItem(item);
 
-                                    e++;
+                                    numberOfEmittedItems++;
                                 }
 
-                                if (e == r) {
-                                    d = inner.done;
+                                if (numberOfEmittedItems == numberOfRequestedItems || numberOfEmittedItems == limit) {
+                                    isDone = inner.done;
                                     boolean empty = q.isEmpty();
-                                    if (d && empty) {
+                                    if (isDone && empty) {
                                         remove(inner.index);
                                         again = true;
                                         replenishMain++;
                                     }
                                 }
 
-                                if (e != 0L) {
+                                if (numberOfEmittedItems != 0L) {
                                     if (!inner.done) {
-                                        inner.request(e);
+                                        inner.request(numberOfEmittedItems);
                                     }
-                                    if (r != Long.MAX_VALUE) {
-                                        r = requested.addAndGet(-e);
-                                        if (r == 0L) {
+                                    if (numberOfRequestedItems != Long.MAX_VALUE) {
+                                        numberOfRequestedItems = requested.addAndGet(-numberOfEmittedItems);
+                                        if (numberOfRequestedItems == 0L) {
                                             break; // 0 .. numberOfItems - 1
                                         }
                                     }
-                                    e = 0L;
+                                    numberOfEmittedItems = 0L;
                                 }
                             }
                         }
 
-                        if (r == 0L) {
+                        if (numberOfRequestedItems == 0L) {
                             break;
                         }
 
-                        if (++j == n) {
+                        if (++j == numberOfInners) {
                             j = 0;
                         }
                     }
@@ -414,22 +413,22 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
                     lastIndex = j;
                 }
 
-                if (r == 0L && !noSources) {
-                    as = get();
-                    n = as.length;
+                if (numberOfRequestedItems == 0L && !noSources) {
+                    innerStreams = get();
+                    numberOfInners = innerStreams.length;
 
-                    for (int i = 0; i < n; i++) {
+                    for (int i = 0; i < numberOfInners; i++) {
                         if (cancelled) {
                             cancelUpstream(false);
                             return;
                         }
 
-                        FlatMapInner<O> inner = as[i];
+                        FlatMapInner<O> inner = innerStreams[i];
                         if (inner == null) {
                             continue;
                         }
 
-                        d = inner.done;
+                        isDone = inner.done;
                         Queue<O> q = inner.queue;
                         boolean empty = (q == null || q.isEmpty());
 
@@ -438,7 +437,7 @@ public final class MultiFlatMapOp<I, O> extends AbstractMultiOperator<I, O> {
                             break;
                         }
 
-                        if (d && empty) {
+                        if (isDone && empty) {
                             remove(inner.index);
                             again = true;
                             replenishMain++;

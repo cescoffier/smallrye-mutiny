@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.assertj.core.api.Assertions;
@@ -1204,5 +1205,25 @@ public class MultiTransformToMultiTest {
         assertThat(subscriber.getItems())
                 .containsExactly(0, 1, 2, 3, 4, -5, 6, 7, 8, 9, -10, 11, 12, 13, 14, -15, 16, 17, 18, 19);
     }
+
+    @Test
+    public void test() {
+        Multi<String> a = Multi.createFrom().items("a", "b", "c", "d");
+        Multi<String> b = Multi.createFrom().items("1", "2", "3", "4", "5", "6");
+
+        AssertSubscriber<String> subscriber = Multi.createBy().merging().withConcurrency(2).withRequests(3).streams(a, b).subscribe().withSubscriber(AssertSubscriber.create(0));
+        subscriber.request(2);
+        System.out.println(subscriber.getItems());
+        subscriber.request(4);
+        System.out.println(subscriber.getItems());
+        subscriber.request(4);
+        System.out.println(subscriber.getItems());
+
+    }
+
+    // TODO Merge 2 infinite streams
+    // TODO Merge 4 but with one empty
+    // TODO Merge with starvation
+
 
 }
