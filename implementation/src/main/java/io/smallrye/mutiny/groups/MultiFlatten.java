@@ -4,6 +4,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
 import java.util.function.Function;
 
+import io.smallrye.mutiny.operators.multi.MultiFlatMapWithBatchOp;
 import org.reactivestreams.Publisher;
 
 import io.smallrye.common.annotation.CheckReturnValue;
@@ -25,14 +26,16 @@ public class MultiFlatten<I, O> {
     private final Multi<I> upstream;
 
     private final int requests;
+    private final int batch;
     private final boolean collectFailureUntilCompletion;
 
     MultiFlatten(Multi<I> upstream,
             Function<? super I, ? extends Publisher<? extends O>> mapper,
-            int requests, boolean collectFailures) {
+            int requests, boolean collectFailures, int batch) {
         this.upstream = upstream;
         this.mapper = mapper;
         this.requests = requests;
+        this.batch = batch;
         this.collectFailureUntilCompletion = collectFailures;
     }
 
@@ -47,7 +50,7 @@ public class MultiFlatten<I, O> {
      */
     @CheckReturnValue
     public MultiFlatten<I, O> collectFailures() {
-        return new MultiFlatten<>(upstream, mapper, requests, true);
+        return new MultiFlatten<>(upstream, mapper, requests, true, batch);
     }
 
     /**
@@ -58,7 +61,18 @@ public class MultiFlatten<I, O> {
      */
     @CheckReturnValue
     public MultiFlatten<I, O> withRequests(int requests) {
-        return new MultiFlatten<>(upstream, mapper, positive(requests, "requests"), collectFailureUntilCompletion);
+        return new MultiFlatten<>(upstream, mapper, positive(requests, "requests"), collectFailureUntilCompletion, this.batch);
+    }
+
+    /**
+     * Indicates that the inner stream consumption uses batch (TODO IMPROVE THIS)
+     *
+     * @param batch the batch size, must be strictly positive
+     * @return this {@link MultiFlatten}
+     */
+    @CheckReturnValue
+    public MultiFlatten<I, O> withBatch(int batch) {
+        return new MultiFlatten<>(upstream, mapper, positive(requests, "requests"), collectFailureUntilCompletion, batch);
     }
 
     /**
@@ -99,6 +113,10 @@ public class MultiFlatten<I, O> {
      */
     @CheckReturnValue
     public Multi<O> merge(int concurrency) {
+        if (batch > 0) {
+            return Infrastructure.onMultiCreation(
+                    new MultiFlatMapWithBatchOp<>(upstream, mapper, collectFailureUntilCompletion, concurrency, requests, batch));
+        }
         return Infrastructure.onMultiCreation(
                 new MultiFlatMapOp<>(upstream, mapper, collectFailureUntilCompletion, concurrency, requests));
     }
@@ -119,6 +137,9 @@ public class MultiFlatten<I, O> {
      */
     @CheckReturnValue
     public Multi<O> concatenate() {
+        if (batch != 0) {
+            throw new IllegalArgumentException("Cannot concatenate using batches");
+        }
         return Infrastructure.onMultiCreation(
                 new MultiFlatMapOp<>(upstream, mapper, collectFailureUntilCompletion, 1, requests));
     }

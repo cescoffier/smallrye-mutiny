@@ -22,11 +22,13 @@ public class MultiMerge {
     private final boolean collectFailures;
     private final int requests;
     private final int concurrency;
+    private final int batch;
 
-    MultiMerge(boolean collectFailures, int requests, int concurrency) {
+    MultiMerge(boolean collectFailures, int requests, int concurrency, int batch) {
         this.collectFailures = collectFailures;
         this.requests = requests;
         this.concurrency = concurrency;
+        this.batch = batch;
     }
 
     /**
@@ -55,7 +57,7 @@ public class MultiMerge {
     @SafeVarargs
     @CheckReturnValue
     public final <T> Multi<T> streams(Publisher<T>... publishers) {
-        return MultiCombine.merge(Arrays.asList(publishers), collectFailures, requests, concurrency);
+        return MultiCombine.merge(Arrays.asList(publishers), collectFailures, requests, concurrency, batch);
     }
 
     /**
@@ -84,7 +86,7 @@ public class MultiMerge {
     public <T> Multi<T> streams(Iterable<? extends Publisher<T>> iterable) {
         List<Publisher<T>> list = new ArrayList<>();
         iterable.forEach(list::add);
-        return MultiCombine.merge(list, collectFailures, requests, concurrency);
+        return MultiCombine.merge(list, collectFailures, requests, concurrency, batch);
     }
 
     /**
@@ -96,7 +98,7 @@ public class MultiMerge {
      */
     @CheckReturnValue
     public MultiMerge collectFailures() {
-        return new MultiMerge(true, this.requests, this.concurrency);
+        return new MultiMerge(true, this.requests, this.concurrency, this.batch);
     }
 
     /**
@@ -107,7 +109,18 @@ public class MultiMerge {
      */
     @CheckReturnValue
     public MultiMerge withRequests(int requests) {
-        return new MultiMerge(this.collectFailures, requests, this.concurrency);
+        return new MultiMerge(this.collectFailures, requests, this.concurrency, this.batch);
+    }
+
+    /**
+     * Indicates that the merge process should consume the different streams by batch of size {@code batch}.
+     *
+     * @param batch the batch size, must be greater than 0.
+     * @return a new {@link MultiMerge} configured with the given requests
+     */
+    @CheckReturnValue
+    public MultiMerge withBatch(int batch) {
+        return new MultiMerge(this.collectFailures, requests, this.concurrency, batch);
     }
 
     /**
@@ -119,7 +132,7 @@ public class MultiMerge {
      */
     @CheckReturnValue
     public MultiMerge withConcurrency(int concurrency) {
-        return new MultiMerge(this.collectFailures, this.requests, concurrency);
+        return new MultiMerge(this.collectFailures, this.requests, concurrency, this.batch);
     }
 
 }

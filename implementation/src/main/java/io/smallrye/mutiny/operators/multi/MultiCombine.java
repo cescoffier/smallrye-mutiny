@@ -17,7 +17,7 @@ public class MultiCombine {
     }
 
     public static <T> Multi<T> merge(List<Publisher<T>> participants, boolean collectFailures, int requests,
-            int concurrency) {
+            int concurrency, int batch) {
         List<Publisher<T>> candidates = ParameterValidation.doesNotContainNull(participants, "participants");
 
         if (participants.isEmpty()) {
@@ -28,11 +28,11 @@ public class MultiCombine {
         }
         if (collectFailures) {
             return Infrastructure.onMultiCreation(new CollectionBasedMulti<>(candidates)
-                    .onItem().transformToMulti(Function.identity()).collectFailures().withRequests(requests)
+                    .onItem().transformToMulti(Function.identity()).collectFailures().withRequests(requests).withBatch(batch)
                     .merge(concurrency));
         } else {
             return Infrastructure.onMultiCreation(new CollectionBasedMulti<>(candidates)
-                    .onItem().transformToMulti(Function.identity()).withRequests(requests).merge(concurrency));
+                    .onItem().transformToMulti(Function.identity()).withRequests(requests).withBatch(batch).merge(concurrency));
         }
     }
 }

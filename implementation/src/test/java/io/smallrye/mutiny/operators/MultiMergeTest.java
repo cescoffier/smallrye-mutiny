@@ -2,9 +2,12 @@ package io.smallrye.mutiny.operators;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
+import org.assertj.core.data.Percentage;
 import org.junit.jupiter.api.Test;
 
 import io.reactivex.Flowable;
@@ -198,5 +201,73 @@ public class MultiMergeTest {
                 .assertItems(5)
                 .assertFailedWith(IllegalStateException.class, "boom");
 
+    }
+
+    private Multi<String> createMultiWithTicks(String name) {
+        final AtomicLong counter = new AtomicLong();
+        return Multi.createFrom().ticks().every(Duration.ofMillis(100))
+                .onOverflow().drop()
+                .flatMap(aLong -> Multi.createFrom().range(0, 400).map(integer -> counter.getAndIncrement()))
+                .map(aLong -> name + " " + aLong)
+                .onRequest().invoke(value -> System.out.printf("Requested %d from %s\n", value, name));
+    }
+
+    @Test
+    void testFairMerge() {
+        Multi<String> first = createMultiWithTicks("First");
+        Multi<String> second = createMultiWithTicks("Second");
+
+        AtomicLong firstCounter = new AtomicLong();
+        AtomicLong secondCounter = new AtomicLong();
+        AssertSubscriber<String> assertSubscriber = Multi.createBy().merging()
+                .withBatch(30)
+                .streams(first, second)
+                .onItem().invoke(aLong -> {
+                    if (aLong.startsWith("First")) {
+                        firstCounter.incrementAndGet();
+                    } else {
+                        secondCounter.incrementAndGet();
+                    }
+                }).subscribe().withSubscriber(new AssertSubscriber<>(Long.MAX_VALUE));
+
+        assertSubscriber.awaitItems(50000, Duration.ofSeconds(60));
+        long firstC = firstCounter.get();
+        long secondC = secondCounter.get();
+        System.out.println("Count First " + firstC);
+        System.out.println("Count Second " + secondC);
+        assertThat(firstC).isCloseTo(secondC, Percentage.withPercentage(10));
+    }
+
+    @Test
+    void testFairMerge2() {
+        Multi<String> first = createMultiWithTicks("First");
+        Multi<String> second = createMultiWithTicks("Second");
+
+        AtomicLong firstCounter = new AtomicLong();
+        AtomicLong secondCounter = new AtomicLong();
+        AssertSubscriber<String> assertSubscriber = Multi.createBy().merging()
+                .withBatch(30).withRequests(30)
+                .streams(first, second)
+                .onItem().invoke(aLong -> {
+                    if (aLong.startsWith("First")) {
+                        firstCounter.incrementAndGet();
+                    } else {
+                        secondCounter.incrementAndGet();
+                    }
+                })
+                        .subscribe().withSubscriber(new AssertSubscriber<String>(1) {
+                            @Override
+                            public synchronized void onNext(String o) {
+                                super.onNext(o);
+                                request(1);
+                            }
+                        });
+
+        assertSubscriber.awaitItems(50000, Duration.ofSeconds(60));
+        long firstC = firstCounter.get();
+        long secondC = secondCounter.get();
+        System.out.println("Count First " + firstC);
+        System.out.println("Count Second " + secondC);
+        assertThat(firstC).isCloseTo(secondC, Percentage.withPercentage(10));
     }
 }

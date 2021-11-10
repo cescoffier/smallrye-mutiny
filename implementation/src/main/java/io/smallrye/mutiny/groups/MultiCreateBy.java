@@ -36,7 +36,7 @@ public class MultiCreateBy {
      */
     @CheckReturnValue
     public MultiMerge merging() {
-        return new MultiMerge(false, 128, 128);
+        return new MultiMerge(false, 128, 128, 0);
     }
 
     /**

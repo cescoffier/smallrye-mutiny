@@ -174,7 +174,7 @@ public class MultiOnItem<T> {
     public <O> MultiFlatten<T, O> transformToMulti(Function<? super T, ? extends Publisher<? extends O>> mapper) {
         Function<? super T, ? extends Publisher<? extends O>> actual = Infrastructure
                 .decorate(nonNull(mapper, "mapper"));
-        return new MultiFlatten<>(upstream, actual, 1, false);
+        return new MultiFlatten<>(upstream, actual, 1, false, 0);
     }
 
     /**
@@ -266,7 +266,7 @@ public class MultiOnItem<T> {
     public <O> MultiFlatten<T, O> transformToUni(Function<? super T, Uni<? extends O>> mapper) {
         Function<? super T, Uni<? extends O>> actual = Infrastructure.decorate(nonNull(mapper, "mapper"));
         Function<? super T, ? extends Publisher<? extends O>> wrapper = res -> actual.apply(res).toMulti();
-        return new MultiFlatten<>(upstream, wrapper, 1, false);
+        return new MultiFlatten<>(upstream, wrapper, 1, false, 0);
     }
 
     /**
